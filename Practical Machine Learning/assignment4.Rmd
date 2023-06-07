@@ -1,0 +1,145 @@
+---
+title: "Coursera Peer graded assignment 4"
+output: html_document
+date: "2023-06-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Coursera Practical Machine Learning Peer Assessment
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: 
+<http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har>
+ (see the section on the Weight Lifting Exercise Dataset).
+
+## Loading Libraries
+```{r,warning=FALSE,message=FALSE,include=FALSE,echo=FALSE}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(knitr)
+library(corrplot)
+library(plotly)
+library(correlationfunnel)
+```
+
+## Data Loading
+```{r}
+dfTrain <- read.csv("Input Data/pml-training.csv", stringsAsFactors = F,na.strings = c("","NA","#DIV/0!"))
+dfTest <- read.csv("Input Data/pml-testing.csv", stringsAsFactors = F,na.strings = c("","NA","#DIV/0!"))
+dim(dfTrain); dim(dfTest)
+```
+## Data Exploration and Cleaning
+```{r}
+table(dfTrain$classe)
+```
+
+Since we choose a random forest model and we have a data set with too many columns, first we check if we have many problems with columns without data. So, remove columns that have less than 60% of data entered.
+
+```{r CkNA, echo=TRUE, results='asis'}
+
+# Number of cols with less than 60% of data
+sum((colSums(!is.na(dfTrain[,-ncol(dfTrain)])) < 0.6*nrow(dfTrain)))
+
+# apply our definition of remove columns that most doesn't have data, before its apply to the model.
+
+Keep <- c((colSums(!is.na(dfTrain[,-ncol(dfTrain)])) >= 0.6*nrow(dfTrain)))
+dfTrain   <-  dfTrain[,Keep]
+
+```
+
+## Data Sets Partitions Definitions
+
+Create data partitions of training and validating data sets.
+
+```{r dataPart}
+set.seed(101)
+inTrain = createDataPartition(dfTrain$classe, p=0.60, list=FALSE)
+training = dfTrain[inTrain,]
+validating = dfTrain[-inTrain,]
+
+# number of rows and columns of data in the training set
+
+dim(training)
+
+# number of rows and columns of data in the validating set
+
+dim(validating)
+
+```
+
+# Data modeling
+
+We will fit a model using **Random Forest** and **XGBoost** for several reasons:
+
+1. With tree-based models, **you can safely ignore** predictors correlation issues
+
+2. Zero- and Near Zero-Variance Predictors **does not** imply on tree-based models
+
+3. As each feature is processed separately, and the possible splits of the data don’t depend on scaling, no preprocessing like normalization or standardization of features is needed for decision tree algorithms.
+
+## Random forest
+
+### Model
+
+```{r}
+controlRf <- trainControl(method="cv", 5, allowParallel = TRUE)
+modelRf <- train(classe ~ ., data=training, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+
+### Performance of the model on the validation data set
+
+```{r, warning=FALSE, message=FALSE, include=FALSE, echo=FALSE}
+predict_rf <- predict(modelRf, validating)
+confusionMatrix(as.factor(validating$classe), predict_rf)
+```
+
+Very accurate model to classify **classe** feature
+
+## XGBoost
+
+```{r}
+controlXGB <- trainControl(method="cv", 5, allowParallel = TRUE)
+modelXGB <- train(classe ~ ., data=training, method="xgbTree", trControl=controlXGB)
+```
+
+```{r}
+modelXGB
+```
+
+### Performance of the model on the validation data set
+
+```{r}
+predict_XGB <- predict(modelXGB, validating)
+confusionMatrix(as.factor(validating$classe), predict_XGB)
+```
+
+# Compare models
+
+```{r}
+# collect resamples
+model_results <- resamples(list(RF=modelRf, XGB=modelXGB))
+# summarize the distributions
+summary(model_results)
+# boxplots of results
+bwplot(model_results)
+# dot plots of results
+dotplot(model_results)
+```
+
+# Predict Test data with RF and XGB
+
+```{r}
+resultRf <- predict(modelRf, dfTest[, -length(names(dfTest))])
+resultXGB <- predict(modelXGB, dfTest[, -length(names(dfTest))])
+resultRf
+resultXGB
+confusionMatrix(resultRf, resultXGB)
+```
+
+
+Finally the model predict the TEST data in the same way, but we noticed that XGB works better with the trainig set
